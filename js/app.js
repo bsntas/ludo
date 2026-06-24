@@ -1,11 +1,8 @@
 import { joinRoom, selfId } from 'https://esm.sh/trystero@0.21.0/mqtt';
+import { buildBoard, renderPieces } from './board.js';
 
 const APP_ID      = 'bsntas-ludo-v1';
-const ROOM_CONFIG = {
-  appId:     APP_ID,
-  brokerUrl: 'wss://broker.hivemq.com:8884/mqtt',
-};
-
+const ROOM_CONFIG = { appId: APP_ID, brokerUrl: 'wss://broker.hivemq.com:8884/mqtt' };
 const COLOR_ORDER = ['red', 'blue', 'green', 'yellow'];
 
 class LudoApp {
@@ -21,16 +18,14 @@ class LudoApp {
     this._toastTimer = null;
     this._heartbeatInterval = null;
     this._reconnecting = false;
-    // players: [{ id, name, color }]
-    this._lobbyPlayers = [];
+    this._lobbyPlayers = []; // [{ id, name, color }]
+    this._boardBuilt = false;
     this.bindUI();
   }
 
-  // ─── Utilities ───────────────────────────────────────────────
+  // ─── Utilities
 
-  genCode() {
-    return Math.random().toString(36).substr(2, 6).toUpperCase();
-  }
+  genCode() { return Math.random().toString(36).substr(2, 6).toUpperCase(); }
 
   showScreen(id) {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -45,74 +40,51 @@ class LudoApp {
     this._toastTimer = setTimeout(() => t.classList.remove('show'), 3500);
   }
 
-  takenColors() {
-    return this._lobbyPlayers.map(p => p.color);
-  }
+  takenColors() { return this._lobbyPlayers.map(p => p.color); }
 
-  // ─── Host flow ───────────────────────────────────────────────
+  // ─── Host flow
 
   createGame() {
     const name = document.getElementById('player-name').value.trim();
     if (!name) { this.showToast('Enter your name', 'error'); return; }
-
     this.myName  = name;
     this.isHost  = true;
     this._lobbyPlayers = [{ id: selfId, name, color: this.myColor }];
-
-    const code    = this.genCode();
+    const code = this.genCode();
     this.roomCode = code;
-
     this.trRoom = joinRoom(ROOM_CONFIG, code);
     const [sendMsg, onMsg] = this.trRoom.makeAction('msg');
     this.sendMsg = sendMsg;
-
-    // Keep MQTT alive
-    this._heartbeatInterval = setInterval(() => {
-      if (this.trRoom) this._broadcastLobby();
-    }, 25000);
-
-    this.trRoom.onPeerJoin(peerId => {
-      sendMsg({ type: 'host-hello', name: this.myName, color: this.myColor }, peerId);
-    });
-
+    this._heartbeatInterval = setInterval(() => { if (this.trRoom) this._broadcastLobby(); }, 25000);
+    this.trRoom.onPeerJoin(peerId => sendMsg({ type: 'host-hello', name: this.myName, color: this.myColor }, peerId));
     this.trRoom.onPeerLeave(peerId => {
       const pl = this._lobbyPlayers.find(p => p.id === peerId);
       if (!pl) return;
+      if (this.publicState?.phase === 'playing') {
+        this.showToast(`${pl.name} disconnected`, 'warn');
+        return;
+      }
       this._lobbyPlayers = this._lobbyPlayers.filter(p => p.id !== peerId);
       this.showToast(`${pl.name} left the lobby`, 'warn');
       this._broadcastLobby();
       this.renderLobbyPlayers();
     });
-
     onMsg((data, peerId) => {
       if (!this.isHost) return;
-
       if (data.type === 'guest-join') {
-        if (this._lobbyPlayers.length >= 4) {
-          sendMsg({ type: 'error', message: 'Room is full (max 4)', fatal: true }, peerId);
-          return;
-        }
-        if (this._lobbyPlayers.find(p => p.name.toLowerCase() === data.name.toLowerCase())) {
-          sendMsg({ type: 'error', message: 'Name already taken', fatal: true }, peerId);
-          return;
-        }
-        // Resolve color conflict
+        if (this._lobbyPlayers.length >= 4) { sendMsg({ type:'error', message:'Room is full (max 4)', fatal:true }, peerId); return; }
+        if (this._lobbyPlayers.find(p => p.name.toLowerCase() === data.name.toLowerCase())) { sendMsg({ type:'error', message:'Name already taken', fatal:true }, peerId); return; }
         let color = data.color;
         const taken = this.takenColors();
-        if (taken.includes(color)) {
-          color = COLOR_ORDER.find(c => !taken.includes(c)) || 'red';
-        }
+        if (taken.includes(color)) color = COLOR_ORDER.find(c => !taken.includes(c)) || 'red';
         this._lobbyPlayers.push({ id: peerId, name: data.name, color });
         this._broadcastLobby();
         this.renderLobbyPlayers();
         return;
       }
-
-      if (data.type === 'ping') {
-        this._broadcastLobby();
-      }
+      if (data.type === 'action') { this._handleAction(peerId, data); return; }
+      if (data.type === 'ping')   { this._broadcastLobby(); }
     });
-
     this.showScreen('lobby');
     document.getElementById('room-code-display').textContent = code;
     document.getElementById('btn-start').style.display   = '';
@@ -124,68 +96,55 @@ class LudoApp {
   _broadcastLobby() {
     if (!this.sendMsg) return;
     const state = { type: 'lobby-state', players: this._lobbyPlayers };
-    for (const p of this._lobbyPlayers) {
-      if (p.id !== selfId) this.sendMsg(state, p.id);
-    }
+    for (const p of this._lobbyPlayers) if (p.id !== selfId) this.sendMsg(state, p.id);
   }
 
-  // ─── Guest flow ──────────────────────────────────────────────
+  _broadcastGameState() {
+    if (!this.sendMsg || !this.publicState) return;
+    for (const p of this.publicState.players) {
+      if (p.id !== selfId) this.sendMsg({ type: 'game-state', state: this.publicState }, p.id);
+    }
+    this._renderGame();
+  }
+
+  // ─── Guest flow
 
   joinGame() {
     const name = document.getElementById('player-name').value.trim();
     const code = document.getElementById('room-code-input').value.trim().toUpperCase();
     if (!name) { this.showToast('Enter your name', 'error'); return; }
     if (!code) { this.showToast('Enter a room code', 'error'); return; }
-
-    this.myName     = name;
-    this.isHost     = false;
-    this.hostPeerId = null;
-
+    this.myName = name; this.isHost = false; this.hostPeerId = null;
     const btnJoin = document.getElementById('btn-join');
-    btnJoin.disabled    = true;
-    btnJoin.textContent = 'Searching…';
-
+    btnJoin.disabled = true; btnJoin.textContent = 'Searching…';
     this.trRoom = joinRoom(ROOM_CONFIG, code);
     const [sendMsg, onMsg] = this.trRoom.makeAction('msg');
     this.sendMsg = sendMsg;
-
     const joinTimeout = setTimeout(() => {
       if (!this.hostPeerId) {
-        this.showToast(`Room "${code}" not found — check the code and retry`, 'error');
-        btnJoin.disabled    = false;
-        btnJoin.textContent = 'Join →';
-        this.trRoom?.leave?.();
-        this.trRoom = null;
+        this.showToast(`Room "${code}" not found`, 'error');
+        btnJoin.disabled = false; btnJoin.textContent = 'Join →';
+        this.trRoom?.leave?.(); this.trRoom = null;
       }
     }, 30000);
-
     this.trRoom.onPeerLeave(peerId => {
-      if (peerId === this.hostPeerId) {
-        this.showToast('Host disconnected — reconnecting…', 'warn');
-        this._attemptReconnect();
-      }
+      if (peerId === this.hostPeerId) { this.showToast('Host disconnected — reconnecting…', 'warn'); this._attemptReconnect(); }
     });
-
     onMsg((data, peerId) => {
       if (this.isHost) return;
-
       if (data.type === 'host-hello' && !this.hostPeerId) {
         clearTimeout(joinTimeout);
-        this.hostPeerId = peerId;
-        this.roomCode   = code;
+        this.hostPeerId = peerId; this.roomCode = code;
         sendMsg({ type: 'guest-join', name: this.myName, color: this.myColor }, peerId);
         this.showScreen('lobby');
         document.getElementById('room-code-display').textContent  = code;
         document.getElementById('btn-start').style.display   = 'none';
         document.getElementById('waiting-text').style.display = '';
-        btnJoin.disabled    = false;
-        btnJoin.textContent = 'Join →';
+        btnJoin.disabled = false; btnJoin.textContent = 'Join →';
         this.saveSession();
         return;
       }
-
       if (peerId !== this.hostPeerId) return;
-
       if (data.type === 'lobby-state') {
         this._lobbyPlayers = data.players;
         const me = data.players.find(p => p.id === selfId);
@@ -193,22 +152,14 @@ class LudoApp {
         this.renderLobbyPlayers();
         return;
       }
-
       if (data.type === 'game-state') {
         this.publicState = data.state;
-        this.showScreen('game');
-        // renderGame() wired in Step 4
+        this._enterGameScreen();
         return;
       }
-
       if (data.type === 'error') {
         this.showToast(data.message, 'error');
-        if (data.fatal) {
-          btnJoin.disabled    = false;
-          btnJoin.textContent = 'Join →';
-          this.trRoom?.leave?.();
-          this.trRoom = null;
-        }
+        if (data.fatal) { btnJoin.disabled = false; btnJoin.textContent = 'Join →'; this.trRoom?.leave?.(); this.trRoom = null; }
       }
     });
   }
@@ -216,12 +167,9 @@ class LudoApp {
   _attemptReconnect() {
     if (this._reconnecting) return;
     this._reconnecting = true;
-    const code = this.roomCode;
-    const name = this.myName;
+    const code = this.roomCode, name = this.myName;
     try { this.trRoom?.leave?.(); } catch (_) {}
-    this.trRoom     = null;
-    this.sendMsg    = null;
-    this.hostPeerId = null;
+    this.trRoom = null; this.sendMsg = null; this.hostPeerId = null;
     setTimeout(() => {
       this._reconnecting = false;
       document.getElementById('player-name').value     = name;
@@ -230,7 +178,7 @@ class LudoApp {
     }, 2000);
   }
 
-  // ─── Lobby rendering ─────────────────────────────────────────
+  // ─── Lobby
 
   renderLobbyPlayers() {
     const players = this._lobbyPlayers;
@@ -240,52 +188,119 @@ class LudoApp {
         <span class="lobby-player-name">${escHtml(p.name)}</span>
         ${i === 0 ? '<span class="host-chip">HOST</span>' : ''}
       </div>`).join('');
-
     document.getElementById('player-count').textContent = `${players.length} / 4 players`;
-
     if (this.isHost) {
-      const canStart = players.length >= 2;
-      document.getElementById('btn-start').textContent = canStart ? 'Start Game' : 'Waiting for players…';
-      document.getElementById('btn-start').disabled    = !canStart;
+      const ok = players.length >= 2;
+      document.getElementById('btn-start').textContent = ok ? 'Start Game' : 'Waiting for players…';
+      document.getElementById('btn-start').disabled    = !ok;
     }
   }
 
-  // ─── Start (host only) ───────────────────────────────────────
+  // ─── Game start
 
   startGame() {
     if (!this.isHost) return;
-    if (this._lobbyPlayers.length < 2) {
-      this.showToast('Need at least 2 players', 'error');
-      return;
-    }
-    // Game engine wired in Step 3/4 — placeholder transition for now
-    const state = { phase: 'playing', players: this._lobbyPlayers };
-    for (const p of this._lobbyPlayers) {
-      if (p.id !== selfId) this.sendMsg({ type: 'game-state', state }, p.id);
-    }
-    this.publicState = state;
-    this.showScreen('game');
+    if (this._lobbyPlayers.length < 2) { this.showToast('Need at least 2 players', 'error'); return; }
+    this.publicState = {
+      phase: 'playing',
+      players: this._lobbyPlayers.map(p => ({ ...p, pieces: [0,0,0,0] })),
+      currentPlayerIndex: 0,
+      diceValue: null,
+      diceRolled: false,
+      lastAction: 'Game started! Roll the dice.',
+      winner: null,
+    };
+    this._broadcastGameState();
+    this._enterGameScreen();
   }
 
-  // ─── Session persistence ─────────────────────────────────────
+  _enterGameScreen() {
+    this.showScreen('game');
+    if (!this._boardBuilt) {
+      buildBoard(document.getElementById('ludo-board'));
+      this._boardBuilt = true;
+    }
+    this._renderGame();
+  }
+
+  // ─── Game actions (host only)
+
+  _handleAction(playerId, data) {
+    // Wired in Step 3 (engine)
+    this._broadcastGameState();
+  }
+
+  sendAction(type, payload = {}) {
+    if (this.isHost) {
+      this._handleAction(selfId, { type, ...payload });
+    } else if (this.hostPeerId && this.sendMsg) {
+      this.sendMsg({ type: 'action', action: type, ...payload }, this.hostPeerId);
+    }
+  }
+
+  // ─── Rendering
+
+  _renderGame() {
+    const st = this.publicState;
+    if (!st) return;
+    const myIdx    = st.players.findIndex(p => p.id === selfId);
+    const isMyTurn = st.currentPlayerIndex === myIdx;
+    const cur      = st.players[st.currentPlayerIndex];
+
+    const badge = document.getElementById('turn-badge');
+    badge.textContent = isMyTurn ? '✨ Your Turn!' : `${cur?.name || ''}'s Turn`;
+    badge.className   = 'turn-badge' + (isMyTurn ? ' my-turn' : '');
+    document.getElementById('last-action').textContent = st.lastAction || '';
+
+    const chip = document.getElementById('dice-chip');
+    if (st.diceValue) {
+      chip.textContent = st.diceValue;
+      chip.style.display = '';
+    } else {
+      chip.style.display = 'none';
+    }
+
+    document.getElementById('btn-roll').disabled = !isMyTurn || st.diceRolled;
+    document.getElementById('btn-pass').style.display = (isMyTurn && st.diceRolled) ? '' : 'none';
+
+    // No movable pieces until engine is wired (Step 3)
+    renderPieces(document.getElementById('ludo-board'), st.players, [], null);
+
+    if (st.phase === 'game_over') this._showGameOver();
+  }
+
+  _showGameOver() {
+    const st = this.publicState;
+    const won = st.winner?.id === selfId;
+    document.getElementById('go-title').textContent = won ? '🏆 You Win!' : 'Game Over!';
+    document.getElementById('go-msg').textContent   = won
+      ? 'You got all 4 pieces home first!'
+      : `${st.winner?.name || 'Someone'} won the game!`;
+    document.getElementById('modal-gameover').classList.add('visible');
+  }
+
+  playAgain() {
+    document.getElementById('modal-gameover').classList.remove('visible');
+    if (this.isHost) {
+      this.publicState = null;
+      this._lobbyPlayers = this._lobbyPlayers.map(p => ({ id: p.id, name: p.name, color: p.color }));
+      this._broadcastLobby();
+      this.showScreen('lobby');
+      this.renderLobbyPlayers();
+    }
+  }
+
+  // ─── Session
 
   saveSession() {
     if (!this.roomCode) return;
-    try {
-      sessionStorage.setItem('ludo-session', JSON.stringify({
-        roomCode:    this.roomCode,
-        playerName:  this.myName,
-        playerColor: this.myColor,
-        isHost:      this.isHost,
-      }));
-    } catch (_) {}
+    try { sessionStorage.setItem('ludo-session', JSON.stringify({ roomCode: this.roomCode, playerName: this.myName, playerColor: this.myColor, isHost: this.isHost })); } catch (_) {}
   }
 
-  // ─── UI bindings ─────────────────────────────────────────────
+  // ─── UI bindings
 
   bindUI() {
     const $ = id => document.getElementById(id);
-
     document.querySelectorAll('.color-pick-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         document.querySelectorAll('.color-pick-btn').forEach(b => b.classList.remove('active'));
@@ -293,58 +308,38 @@ class LudoApp {
         this.myColor = btn.dataset.color;
       });
     });
-
     $('btn-create').addEventListener('click', () => this.createGame());
     $('btn-join').addEventListener('click',   () => this.joinGame());
-
-    $('player-name').addEventListener('keydown', e => {
-      if (e.key === 'Enter') {
-        const code = $('room-code-input').value.trim();
-        if (code) this.joinGame(); else this.createGame();
-      }
-    });
-    $('room-code-input').addEventListener('keydown', e => {
-      if (e.key === 'Enter') this.joinGame();
-    });
-
+    $('player-name').addEventListener('keydown', e => { if (e.key==='Enter') { const c=$('room-code-input').value.trim(); if(c) this.joinGame(); else this.createGame(); } });
+    $('room-code-input').addEventListener('keydown', e => { if (e.key==='Enter') this.joinGame(); });
     $('btn-copy').addEventListener('click', () => {
       const code = $('room-code-display').textContent;
-      navigator.clipboard.writeText(code)
-        .then(() => this.showToast('Room code copied!'))
-        .catch(() => this.showToast('Code: ' + code));
+      navigator.clipboard.writeText(code).then(() => this.showToast('Room code copied!')).catch(() => this.showToast('Code: ' + code));
     });
-
     $('btn-start').addEventListener('click', () => this.startGame());
+    $('btn-roll').addEventListener('click',  () => this.sendAction('roll'));
+    $('btn-pass').addEventListener('click',  () => this.sendAction('pass'));
+    $('btn-play-again').addEventListener('click', () => this.playAgain());
   }
 }
 
-function escHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 window.addEventListener('DOMContentLoaded', () => {
   window.app = new LudoApp();
+  const $ = id => document.getElementById(id);
   try {
     const raw = sessionStorage.getItem('ludo-session');
     if (raw) {
       const { roomCode, playerName, playerColor, isHost } = JSON.parse(raw);
       if (playerName) $('player-name').value = playerName;
       if (playerColor) {
-        document.querySelectorAll('.color-pick-btn').forEach(b => {
-          b.classList.toggle('active', b.dataset.color === playerColor);
-        });
+        document.querySelectorAll('.color-pick-btn').forEach(b => b.classList.toggle('active', b.dataset.color === playerColor));
         window.app.myColor = playerColor;
       }
-      if (!isHost && roomCode) {
-        $('room-code-input').value = roomCode;
-        window.app.showToast(`Tap "Join →" to rejoin ${roomCode}`, 'info');
-      }
+      if (!isHost && roomCode) { $('room-code-input').value = roomCode; window.app.showToast(`Tap "Join →" to rejoin ${roomCode}`, 'info'); }
     }
-  } catch (_) {
-    sessionStorage.removeItem('ludo-session');
-  }
-
-  function $(id) { return document.getElementById(id); }
+  } catch (_) { sessionStorage.removeItem('ludo-session'); }
 });

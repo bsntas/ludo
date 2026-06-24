@@ -14,7 +14,6 @@
   <!-- HOME -->
   <div id="screen-home" class="screen active">
     <div class="home-wrap">
-
       <div class="logo">
         <div class="logo-board">
           <div class="lb-q lb-red"></div>
@@ -25,27 +24,22 @@
         <span class="logo-text">LUDO</span>
         <span class="logo-sub">Multiplayer</span>
       </div>
-
       <div class="home-form">
         <div class="input-group">
           <span class="icon">👤</span>
           <input id="player-name" type="text" placeholder="Your name…" maxlength="20" autocomplete="off">
         </div>
-
         <div class="color-pick-wrap">
           <span class="color-pick-label">Pick your color</span>
           <div class="color-pick-row" id="color-pick-row">
-            <button class="color-pick-btn cpb-red   active" data-color="red"    title="Red"></button>
-            <button class="color-pick-btn cpb-blue"         data-color="blue"   title="Blue"></button>
-            <button class="color-pick-btn cpb-green"        data-color="green"  title="Green"></button>
-            <button class="color-pick-btn cpb-yellow"       data-color="yellow" title="Yellow"></button>
+            <button class="color-pick-btn cpb-red active" data-color="red" title="Red"></button>
+            <button class="color-pick-btn cpb-blue" data-color="blue" title="Blue"></button>
+            <button class="color-pick-btn cpb-green" data-color="green" title="Green"></button>
+            <button class="color-pick-btn cpb-yellow" data-color="yellow" title="Yellow"></button>
           </div>
         </div>
-
         <button id="btn-create" class="btn-primary">Create Game</button>
-
         <div class="divider">OR JOIN</div>
-
         <div class="join-row">
           <div class="input-group">
             <span class="icon">🔑</span>
@@ -54,19 +48,16 @@
           <button id="btn-join" class="btn-join-go">Join →</button>
         </div>
       </div>
-
     </div>
   </div>
 
   <!-- LOBBY -->
   <div id="screen-lobby" class="screen">
     <div class="lobby-wrap">
-
       <div class="lobby-header">
         <h2>Game Lobby</h2>
         <p>Share the room code with your friends</p>
       </div>
-
       <div class="code-card">
         <div>
           <div class="code-label">Room Code</div>
@@ -74,7 +65,6 @@
         </div>
         <button id="btn-copy" class="btn-copy">📋 Copy</button>
       </div>
-
       <div class="players-section">
         <div class="players-header">
           <h3>Players</h3>
@@ -82,23 +72,35 @@
         </div>
         <div id="player-list"></div>
       </div>
-
       <div class="lobby-actions">
-        <button id="btn-start" class="btn-primary" style="display:none" disabled>
-          Waiting for players…
-        </button>
-        <p id="waiting-text" style="text-align:center;color:var(--text-muted);font-size:14px;padding:8px">
-          ⏳ Waiting for the host to start the game…
-        </p>
+        <button id="btn-start" class="btn-primary" style="display:none" disabled>Waiting for players…</button>
+        <p id="waiting-text" style="text-align:center;color:var(--text-muted);font-size:14px;padding:8px">⏳ Waiting for the host to start the game…</p>
       </div>
-
     </div>
   </div>
 
-  <!-- GAME (placeholder — board in Step 2) -->
+  <!-- GAME -->
   <div id="screen-game" class="screen">
-    <div class="game-placeholder">
-      <p>🎲 Board coming in the next step…</p>
+    <div class="game-bar">
+      <div id="turn-badge" class="turn-badge">—</div>
+      <span id="last-action" class="action-text"></span>
+      <div id="dice-chip" class="dice-chip" style="display:none"></div>
+    </div>
+    <div class="board-wrap">
+      <div id="ludo-board"></div>
+    </div>
+    <div class="ctrl-bar">
+      <button id="btn-roll" class="btn-roll" disabled>🎲 Roll Dice</button>
+      <button id="btn-pass" class="btn-pass" style="display:none">Skip Turn</button>
+    </div>
+  </div>
+
+  <!-- Game over modal -->
+  <div id="modal-gameover" class="modal">
+    <div class="modal-box">
+      <h2 id="go-title">Game Over!</h2>
+      <p id="go-msg"></p>
+      <button id="btn-play-again" class="btn-primary">Play Again</button>
     </div>
   </div>
 
