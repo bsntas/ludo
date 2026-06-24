@@ -5,7 +5,6 @@ import { rollDice, getMovablePieces, movePiece, nextTurn } from './ludo-engine.j
 const APP_ID      = 'bsntas-ludo-v1';
 const ROOM_CONFIG = { appId: APP_ID, brokerUrl: 'wss://broker.hivemq.com:8884/mqtt' };
 const COLOR_ORDER = ['red', 'blue', 'green', 'yellow'];
-const DICE_FACES  = ['', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
 
 class LudoApp {
   constructor() {
@@ -297,7 +296,7 @@ class LudoApp {
         return;
       }
 
-      // Extra turn: rolling 6, capturing a piece, or getting a piece home
+      // Extra turn: rolled 6, captured a piece, or got a piece home
       const getsExtraTurn = dice === 6 || captured.length > 0 || newPos === 58;
       if (getsExtraTurn) {
         newSt.diceValue   = null;
@@ -350,13 +349,13 @@ class LudoApp {
 
     const chip = document.getElementById('dice-chip');
     if (st.diceRolling) {
-      chip.textContent   = '🎲';
+      chip.textContent   = '?';
       chip.style.display = '';
       chip.className     = 'dice-chip rolling';
       chip.dataset.val   = '';
     } else if (st.diceValue) {
       const newVal = String(st.diceValue);
-      chip.textContent   = DICE_FACES[st.diceValue] || st.diceValue;
+      chip.textContent   = newVal;          // bold number, easy to read
       chip.style.display = '';
       if (chip.dataset.val !== newVal) {
         chip.className   = 'dice-chip landed';

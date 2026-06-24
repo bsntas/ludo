@@ -2,9 +2,11 @@ import { COLOR_START } from './board.js';
 
 const SAFE_TRACK_IDX = new Set([0, 8, 13, 21, 26, 34, 39, 47]);
 
-// pos 58 = center (home). Pieces skip turns once at 58.
+// Uses crypto.getRandomValues for better randomness distribution
 export function rollDice() {
-  return Math.floor(Math.random() * 6) + 1;
+  const buf = new Uint32Array(1);
+  crypto.getRandomValues(buf);
+  return (buf[0] % 6) + 1;
 }
 
 function absIdx(color, pos) {

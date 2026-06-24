@@ -187,24 +187,33 @@ input { font-family: inherit; border: none; outline: none; }
 
 .game-bar {
   flex-shrink: 0; display: flex; align-items: center; gap: 10px;
-  padding: 8px 14px; background: rgba(0,0,0,.4);
-  border-bottom: 1px solid rgba(255,255,255,.08); min-height: 46px;
+  padding: 6px 12px; background: rgba(0,0,0,.45);
+  border-bottom: 1px solid rgba(255,255,255,.08); min-height: 52px;
 }
 .turn-badge {
-  font-size: 13px; font-weight: 700; padding: 4px 12px;
+  font-size: 13px; font-weight: 700; padding: 5px 12px;
   border-radius: 20px; background: var(--surface-light); white-space: nowrap; flex-shrink: 0;
 }
 .turn-badge.my-turn {
   background: rgba(245,200,66,.22); color: var(--gold);
   animation: pulse 1.5s ease-in-out infinite;
 }
-@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.6} }
-.action-text { flex:1; font-size:12px; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.65} }
+.action-text { flex:1; font-size:12px; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding: 0 4px; }
+
+/* Dice chip — shows the rolled number clearly */
 .dice-chip {
-  font-size: 20px; width: 36px; height: 36px;
+  font-size: 22px; width: 44px; height: 44px;
   display: flex; align-items: center; justify-content: center;
-  background: var(--surface-light); border-radius: 8px; font-weight: 900; flex-shrink: 0;
-  transition: background .2s;
+  background: rgba(245,200,66,.12);
+  border: 1.5px solid rgba(245,200,66,.35);
+  border-radius: 10px;
+  font-weight: 900;
+  color: var(--gold);
+  flex-shrink: 0;
+  transition: background .2s, border-color .2s;
+  letter-spacing: 0;
+  forced-color-adjust: none;
 }
 
 /* ─ Board ───────────────────────────────────────────────── */
@@ -217,15 +226,15 @@ input { font-family: inherit; border: none; outline: none; }
   display: grid;
   grid-template-columns: repeat(15, 1fr);
   grid-template-rows: repeat(15, 1fr);
-  width: min(calc(100svh - 136px), calc(100vw - 8px), 490px);
-  height: min(calc(100svh - 136px), calc(100vw - 8px), 490px);
-  border: 2px solid #666; border-radius: 3px; overflow: hidden;
-  background: #d8d0c8;
+  width: min(calc(100svh - 140px), calc(100vw - 8px), 490px);
+  height: min(calc(100svh - 140px), calc(100vw - 8px), 490px);
+  border: 2px solid #555; border-radius: 3px; overflow: hidden;
+  background: #cec6bc;
   forced-color-adjust: none;
 }
 
 .bcell {
-  border: 0.5px solid rgba(0,0,0,.15);
+  border: 0.5px solid rgba(0,0,0,.2);
   display: flex; align-items: center; justify-content: center;
   position: relative; overflow: visible;
   forced-color-adjust: none;
@@ -235,15 +244,16 @@ input { font-family: inherit; border: none; outline: none; }
 .bcell-zone-blue   { background: #a0bef4; }
 .bcell-zone-green  { background: #a0e8b0; }
 .bcell-zone-yellow { background: #f0f0a0; }
-.bcell-blank       { background: #d8d0c8; }
+.bcell-blank       { background: #cec6bc; }
 
 .bcell-base::before {
   content: '';
   position: absolute;
-  width: 78%; height: 78%; border-radius: 50%;
-  border: 2px solid rgba(255,255,255,.55);
-  background: rgba(255,255,255,.18);
+  width: 80%; height: 80%; border-radius: 50%;
+  border: 2px solid rgba(255,255,255,.6);
+  background: rgba(255,255,255,.2);
   pointer-events: none;
+  z-index: 1;
 }
 
 .bcell-path  { background: #f8f5ee; }
@@ -251,7 +261,7 @@ input { font-family: inherit; border: none; outline: none; }
 .bcell-safe  { background: #f8f5ee; }
 .bcell-safe::after {
   content: '\2605';
-  font-size: .75em; color: rgba(0,0,0,.35); pointer-events: none;
+  font-size: .75em; color: rgba(0,0,0,.32); pointer-events: none;
 }
 
 .bcell-start-red    { background: #e53e3e; }
@@ -264,8 +274,14 @@ input { font-family: inherit; border: none; outline: none; }
 .bcell-start-green::after,
 .bcell-start-yellow::after {
   content: '\2605';
-  font-size: .75em; color: rgba(255,255,255,.8); pointer-events: none;
+  font-size: .75em; color: rgba(255,255,255,.85); pointer-events: none;
 }
+
+/* Home column entry arrows — one per color showing where pieces turn in */
+.bcell[data-pos="7,0"]::after  { content: '\2192'; font-size: .7em; color: rgba(200,40,40,.85);  pointer-events: none; }
+.bcell[data-pos="0,7"]::after  { content: '\2193'; font-size: .7em; color: rgba(30,90,200,.85);  pointer-events: none; }
+.bcell[data-pos="7,14"]::after { content: '\2190'; font-size: .7em; color: rgba(30,140,60,.85);  pointer-events: none; }
+.bcell[data-pos="14,7"]::after { content: '\2191'; font-size: .7em; color: rgba(180,130,0,.85);  pointer-events: none; }
 
 .bcell-hcol-red    { background: #f9c0c0; }
 .bcell-hcol-blue   { background: #c0d6f9; }
@@ -279,7 +295,7 @@ input { font-family: inherit; border: none; outline: none; }
   );
 }
 .bcell-center::after {
-  content: '\2605'; font-size: .9em; color: rgba(255,255,255,.8); pointer-events: none;
+  content: '\2605'; font-size: .9em; color: rgba(255,255,255,.85); pointer-events: none;
 }
 
 /* ─ Pieces ───────────────────────────────────────────────── */
@@ -291,13 +307,12 @@ input { font-family: inherit; border: none; outline: none; }
   box-shadow: 0 1px 5px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.3);
   z-index: 5;
   display: flex; align-items: center; justify-content: center;
-  font-size: .42em; font-weight: 900;
-  color: rgba(255,255,255,.9);
-  text-shadow: 0 1px 2px rgba(0,0,0,.5);
   cursor: default;
   transition: box-shadow .15s;
   pointer-events: none;
   forced-color-adjust: none;
+  /* Default: centered on cell */
+  transform: translate(0, 0);
 }
 .piece-red    { background: radial-gradient(circle at 35% 35%, #ff8888, #c02828); }
 .piece-blue   { background: radial-gradient(circle at 35% 35%, #88aaff, #1050b0); }
@@ -308,16 +323,25 @@ input { font-family: inherit; border: none; outline: none; }
   cursor: pointer; pointer-events: auto;
   animation: pieceGlow 1s ease-in-out infinite;
 }
-.piece.movable:hover { transform: scale(1.25) !important; z-index: 20; }
+.piece.movable:hover { transform: scale(1.28) !important; z-index: 20; }
 @keyframes pieceGlow {
   0%,100% { box-shadow: 0 1px 4px rgba(0,0,0,.55), 0 0 0 0 rgba(255,255,255,.5); }
-  50%      { box-shadow: 0 1px 4px rgba(0,0,0,.55), 0 0 0 4px rgba(255,255,255,.45); }
+  50%      { box-shadow: 0 1px 4px rgba(0,0,0,.55), 0 0 0 5px rgba(255,255,255,.4); }
 }
 
-.bcell .piece:nth-child(1) { transform: translate(-22%, -22%); }
-.bcell .piece:nth-child(2) { transform: translate( 22%, -22%); }
-.bcell .piece:nth-child(3) { transform: translate(-22%,  22%); }
-.bcell .piece:nth-child(4) { transform: translate( 22%,  22%); }
+/* Spread pieces only when multiple occupy the same cell */
+.bcell.multi-2 .piece:nth-child(1),
+.bcell.multi-3 .piece:nth-child(1),
+.bcell.multi-4 .piece:nth-child(1) { transform: translate(-22%, -22%); }
+
+.bcell.multi-2 .piece:nth-child(2),
+.bcell.multi-3 .piece:nth-child(2),
+.bcell.multi-4 .piece:nth-child(2) { transform: translate( 22%, -22%); }
+
+.bcell.multi-3 .piece:nth-child(3),
+.bcell.multi-4 .piece:nth-child(3) { transform: translate(-22%,  22%); }
+
+.bcell.multi-4 .piece:nth-child(4) { transform: translate( 22%,  22%); }
 
 /* ─ Controls bar ──────────────────────────────────── */
 .ctrl-bar {
@@ -326,13 +350,13 @@ input { font-family: inherit; border: none; outline: none; }
   background: rgba(0,0,0,.35); border-top: 1px solid rgba(255,255,255,.08);
 }
 .btn-roll {
-  padding: 12px 36px; border-radius: 50px; font-size: 16px;
+  padding: 13px 38px; border-radius: 50px; font-size: 16px;
   background: linear-gradient(135deg, var(--gold), var(--gold-dark));
   color: #1a1a1a; box-shadow: 0 4px 14px rgba(245,200,66,.35);
 }
 .btn-roll:hover:not(:disabled) { box-shadow: 0 6px 20px rgba(245,200,66,.5); transform: translateY(-1px); }
 .btn-pass {
-  padding: 12px 24px; border-radius: 50px; font-size: 14px;
+  padding: 13px 24px; border-radius: 50px; font-size: 14px;
   background: var(--surface-light); color: var(--text); border: 1.5px solid rgba(255,255,255,.2);
 }
 
@@ -372,29 +396,32 @@ input { font-family: inherit; border: none; outline: none; }
 /* ─ Dice animations ───────────────────────────────────── */
 @keyframes diceRollAnim {
   0%,100% { transform: scale(1)    rotate(0deg); }
-  20%     { transform: scale(1.25) rotate(-22deg); }
-  40%     { transform: scale(.88)  rotate(16deg); }
-  60%     { transform: scale(1.15) rotate(-10deg); }
-  80%     { transform: scale(.95)  rotate(6deg); }
+  20%     { transform: scale(1.3)  rotate(-25deg); }
+  40%     { transform: scale(.85)  rotate(18deg); }
+  60%     { transform: scale(1.2)  rotate(-12deg); }
+  80%     { transform: scale(.92)  rotate(8deg); }
 }
 .dice-chip.rolling {
-  animation: diceRollAnim .42s ease-in-out infinite;
+  animation: diceRollAnim .4s ease-in-out infinite;
   background: rgba(245,200,66,.2);
+  border-color: rgba(245,200,66,.6);
   color: var(--gold);
 }
 @keyframes diceLandAnim {
-  0%   { transform: scale(1.8);  filter: brightness(1.9); }
-  55%  { transform: scale(.86);  filter: brightness(1.2); }
+  0%   { transform: scale(1.9);  filter: brightness(2); }
+  55%  { transform: scale(.84);  filter: brightness(1.2); }
   80%  { transform: scale(1.1);  filter: brightness(1); }
   100% { transform: scale(1);    filter: brightness(1); }
 }
 .dice-chip.landed {
   animation: diceLandAnim .42s cubic-bezier(.34,1.56,.64,1) forwards;
+  background: rgba(245,200,66,.25);
+  border-color: var(--gold);
 }
 
 /* ─ Piece flash on move ───────────────────────────────── */
 @keyframes pieceLandFlash {
-  0%   { filter: brightness(2.4) drop-shadow(0 0 7px rgba(255,255,255,.95)); }
+  0%   { filter: brightness(2.4) drop-shadow(0 0 8px rgba(255,255,255,.95)); }
   55%  { filter: brightness(1.5) drop-shadow(0 0 3px rgba(255,255,255,.4)); }
   100% { filter: brightness(1)   drop-shadow(none); }
 }
