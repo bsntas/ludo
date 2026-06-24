@@ -16,11 +16,12 @@ class LudoApp {
     this.hostPeerId  = null;
     this.roomCode    = null;
     this.publicState = null;
-    this._toastTimer = null;
+    this._toastTimer      = null;
     this._heartbeatInterval = null;
-    this._reconnecting = false;
-    this._lobbyPlayers = [];
-    this._boardBuilt = false;
+    this._reconnecting    = false;
+    this._foregroundTimer = null;  // timeout to force-reconnect if ping gets no reply
+    this._lobbyPlayers    = [];
+    this._boardBuilt      = false;
     this.bindUI();
   }
 
@@ -40,6 +41,39 @@ class LudoApp {
   }
 
   takenColors() { return this._lobbyPlayers.map(p => p.color); }
+
+  // ── Called whenever the page returns to the foreground or goes online ──────
+  _onForeground() {
+    clearTimeout(this._foregroundTimer);
+    if (!this.roomCode) return;
+
+    if (!this.trRoom || !this.sendMsg) {
+      // Connection object is gone — need a full reconnect (guests only; host keeps state)
+      if (!this.isHost && !this._reconnecting) this._attemptReconnect();
+      return;
+    }
+
+    if (this.isHost) {
+      // Re-push authoritative state to all peers after a short settle delay
+      setTimeout(() => {
+        if (this.publicState?.phase === 'playing') this._broadcastGameState();
+        else this._broadcastLobby();
+      }, 600);
+    } else {
+      if (!this.hostPeerId) {
+        if (!this._reconnecting) this._attemptReconnect();
+        return;
+      }
+      // Ping host — if no game/lobby-state arrives within 8 s, force rejoin
+      try { this.sendMsg({ type: 'ping' }, this.hostPeerId); } catch (_) {
+        if (!this._reconnecting) this._attemptReconnect();
+        return;
+      }
+      this._foregroundTimer = setTimeout(() => {
+        if (this.roomCode && !this.isHost && !this._reconnecting) this._attemptReconnect();
+      }, 8000);
+    }
+  }
 
   createGame() {
     const name = document.getElementById('player-name').value.trim();
@@ -65,7 +99,34 @@ class LudoApp {
     });
     onMsg((data, peerId) => {
       if (!this.isHost) return;
+
       if (data.type === 'guest-join') {
+        // ── Reconnect: same peerId already known ──────────────────────────────
+        if (this._lobbyPlayers.find(p => p.id === peerId)) {
+          if (this.publicState?.phase === 'playing') {
+            sendMsg({ type: 'game-state', state: this.publicState }, peerId);
+          } else {
+            sendMsg({ type: 'lobby-state', players: this._lobbyPlayers }, peerId);
+          }
+          return;
+        }
+        // ── Reconnect during game: match by name, swap peerId ─────────────────
+        if (this.publicState?.phase === 'playing') {
+          const byName = this._lobbyPlayers.find(
+            p => p.name.toLowerCase() === data.name.toLowerCase()
+          );
+          if (byName) {
+            byName.id = peerId;
+            const sp = this.publicState.players.find(p => p.name === byName.name);
+            if (sp) sp.id = peerId;
+            sendMsg({ type: 'game-state', state: this.publicState }, peerId);
+            this.showToast(`${byName.name} reconnected`, 'success');
+            return;
+          }
+          sendMsg({ type: 'error', message: 'Game already in progress', fatal: true }, peerId);
+          return;
+        }
+        // ── Normal new-player lobby join ──────────────────────────────────────
         if (this._lobbyPlayers.length >= 4) { sendMsg({ type:'error', message:'Room is full (max 4)', fatal:true }, peerId); return; }
         if (this._lobbyPlayers.find(p => p.name.toLowerCase() === data.name.toLowerCase())) { sendMsg({ type:'error', message:'Name already taken', fatal:true }, peerId); return; }
         let color = data.color;
@@ -76,8 +137,17 @@ class LudoApp {
         this.renderLobbyPlayers();
         return;
       }
+
       if (data.type === 'action') { this._handleAction(peerId, data); return; }
-      if (data.type === 'ping')   { this._broadcastLobby(); }
+
+      if (data.type === 'ping') {
+        // Reply with current state so the guest can resync
+        if (this.publicState?.phase === 'playing') {
+          sendMsg({ type: 'game-state', state: this.publicState }, peerId);
+        } else {
+          this._broadcastLobby();
+        }
+      }
     });
     this.showScreen('lobby');
     document.getElementById('room-code-display').textContent = code;
@@ -124,20 +194,30 @@ class LudoApp {
     });
     onMsg((data, peerId) => {
       if (this.isHost) return;
-      if (data.type === 'host-hello' && !this.hostPeerId) {
-        clearTimeout(joinTimeout);
-        this.hostPeerId = peerId; this.roomCode = code;
+
+      // host-hello: fires on initial join AND when Trystero re-establishes the peer link
+      if (data.type === 'host-hello') {
+        const isInitial = !this.hostPeerId;
+        this.hostPeerId = peerId;
+        if (isInitial) {
+          clearTimeout(joinTimeout);
+          this.roomCode = code;
+          this.showScreen('lobby');
+          document.getElementById('room-code-display').textContent  = code;
+          document.getElementById('btn-start').style.display   = 'none';
+          document.getElementById('waiting-text').style.display = '';
+          btnJoin.disabled = false; btnJoin.textContent = 'Join →';
+          this.saveSession();
+        }
+        // Always (re-)register so host can resend current state
         sendMsg({ type: 'guest-join', name: this.myName, color: this.myColor }, peerId);
-        this.showScreen('lobby');
-        document.getElementById('room-code-display').textContent  = code;
-        document.getElementById('btn-start').style.display   = 'none';
-        document.getElementById('waiting-text').style.display = '';
-        btnJoin.disabled = false; btnJoin.textContent = 'Join →';
-        this.saveSession();
         return;
       }
+
       if (peerId !== this.hostPeerId) return;
+
       if (data.type === 'lobby-state') {
+        clearTimeout(this._foregroundTimer);
         this._lobbyPlayers = data.players;
         const me = data.players.find(p => p.id === selfId);
         if (me) this.myColor = me.color;
@@ -145,6 +225,7 @@ class LudoApp {
         return;
       }
       if (data.type === 'game-state') {
+        clearTimeout(this._foregroundTimer);
         this.publicState = data.state;
         this._enterGameScreen();
         return;
@@ -296,7 +377,6 @@ class LudoApp {
         return;
       }
 
-      // Extra turn: rolled 6, captured a piece, or got a piece home
       const getsExtraTurn = dice === 6 || captured.length > 0 || newPos === 58;
       if (getsExtraTurn) {
         newSt.diceValue   = null;
@@ -355,7 +435,7 @@ class LudoApp {
       chip.dataset.val   = '';
     } else if (st.diceValue) {
       const newVal = String(st.diceValue);
-      chip.textContent   = newVal;          // bold number, easy to read
+      chip.textContent   = newVal;
       chip.style.display = '';
       if (chip.dataset.val !== newVal) {
         chip.className   = 'dice-chip landed';
@@ -462,6 +542,14 @@ class LudoApp {
     $('btn-roll').addEventListener('click',       () => this.sendAction('roll'));
     $('btn-pass').addEventListener('click',       () => this.sendAction('pass'));
     $('btn-play-again').addEventListener('click', () => this.playAgain());
+
+    // Re-establish connection when returning from background or going back online
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && this.roomCode) this._onForeground();
+    });
+    window.addEventListener('online', () => {
+      if (this.roomCode) this._onForeground();
+    });
   }
 }
 
