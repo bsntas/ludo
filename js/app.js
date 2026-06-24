@@ -1,5 +1,6 @@
 import { joinRoom, selfId } from 'https://esm.sh/trystero@0.21.0/mqtt';
 import { buildBoard, renderPieces } from './board.js';
+import { rollDice, getMovablePieces, movePiece, nextTurn } from './ludo-engine.js';
 
 const APP_ID      = 'bsntas-ludo-v1';
 const ROOM_CONFIG = { appId: APP_ID, brokerUrl: 'wss://broker.hivemq.com:8884/mqtt' };
@@ -18,7 +19,7 @@ class LudoApp {
     this._toastTimer = null;
     this._heartbeatInterval = null;
     this._reconnecting = false;
-    this._lobbyPlayers = []; // [{ id, name, color }]
+    this._lobbyPlayers = [];
     this._boardBuilt = false;
     this.bindUI();
   }
@@ -207,6 +208,7 @@ class LudoApp {
       currentPlayerIndex: 0,
       diceValue: null,
       diceRolled: false,
+      movablePieces: [],
       lastAction: 'Game started! Roll the dice.',
       winner: null,
     };
@@ -223,11 +225,103 @@ class LudoApp {
     this._renderGame();
   }
 
-  // ─── Game actions (host only)
+  // ─── Game engine (host only)
 
   _handleAction(playerId, data) {
-    // Wired in Step 3 (engine)
-    this._broadcastGameState();
+    if (!this.publicState || this.publicState.phase !== 'playing') return;
+    const st = this.publicState;
+    const cur = st.players[st.currentPlayerIndex];
+    if (cur.id !== playerId) return;
+
+    const act = data.action || data.type;
+
+    if (act === 'roll') {
+      if (st.diceRolled) return;
+      const dice    = rollDice();
+      const movable = getMovablePieces(st, cur.color, dice);
+      st.diceValue      = dice;
+      st.diceRolled     = true;
+      st.lastAction     = `${cur.name} rolled a ${dice}`;
+      st.movablePieces  = movable.map(idx => ({ color: cur.color, idx }));
+      this.publicState  = st;
+      this._broadcastGameState();
+      if (movable.length === 0) {
+        setTimeout(() => {
+          this.publicState = nextTurn(this.publicState);
+          this.publicState.lastAction = `${cur.name} rolled ${dice} — no moves, turn passed`;
+          this._broadcastGameState();
+        }, 1500);
+      }
+      return;
+    }
+
+    if (act === 'move') {
+      if (!st.diceRolled) return;
+      const { pieceIdx } = data;
+      if (pieceIdx === undefined || pieceIdx === null) return;
+      const movable = getMovablePieces(st, cur.color, st.diceValue);
+      if (!movable.includes(pieceIdx)) return;
+
+      const dice = st.diceValue;
+
+      // Snapshot opponent positions before move for capture detection
+      const prevOpp = {};
+      for (const opp of st.players) {
+        if (opp.color !== cur.color) prevOpp[opp.color] = [...opp.pieces];
+      }
+
+      let newSt = movePiece(st, cur.color, pieceIdx, dice);
+      const newPos = newSt.players.find(p => p.color === cur.color).pieces[pieceIdx];
+
+      // Detect captures
+      const captured = [];
+      for (const opp of newSt.players) {
+        if (opp.color === cur.color) continue;
+        opp.pieces.forEach((pos, i) => {
+          if (prevOpp[opp.color][i] !== 0 && pos === 0) captured.push(opp.name);
+        });
+      }
+
+      newSt.lastAction    = `${cur.name} moved piece ${pieceIdx + 1}`;
+      if (captured.length)  newSt.lastAction += ` — captured ${captured.join(' & ')}!`;
+      if (newPos === 59)    newSt.lastAction += ' — reached home!';
+      newSt.movablePieces = [];
+
+      if (newSt.phase === 'game_over') {
+        this.publicState = newSt;
+        this._broadcastGameState();
+        return;
+      }
+
+      if (dice === 6) {
+        // Extra turn: same player, reset dice
+        newSt.diceValue  = null;
+        newSt.diceRolled = false;
+        newSt.lastAction += ' — rolled 6, play again!';
+      } else {
+        newSt = nextTurn(newSt);
+        // nextTurn clears lastAction to ''; restore it
+        newSt.lastAction = st.lastAction.replace(st.lastAction, newSt.lastAction) ||
+          `${cur.name} moved piece ${pieceIdx + 1}`;
+        // Simpler: just re-set it after nextTurn
+        const msg = `${cur.name} moved piece ${pieceIdx + 1}`
+          + (captured.length ? ` — captured ${captured.join(' & ')}!` : '')
+          + (newPos === 59   ? ' — reached home!' : '');
+        newSt.lastAction = msg;
+      }
+
+      this.publicState = newSt;
+      this._broadcastGameState();
+      return;
+    }
+
+    if (act === 'pass') {
+      if (!st.diceRolled) return;
+      const name = cur.name, dice = st.diceValue;
+      this.publicState = nextTurn(st);
+      this.publicState.lastAction = `${name} passed (rolled ${dice})`;
+      this._broadcastGameState();
+    }
   }
 
   sendAction(type, payload = {}) {
@@ -254,7 +348,7 @@ class LudoApp {
 
     const chip = document.getElementById('dice-chip');
     if (st.diceValue) {
-      chip.textContent = st.diceValue;
+      chip.textContent = ['', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'][st.diceValue] || st.diceValue;
       chip.style.display = '';
     } else {
       chip.style.display = 'none';
@@ -263,8 +357,11 @@ class LudoApp {
     document.getElementById('btn-roll').disabled = !isMyTurn || st.diceRolled;
     document.getElementById('btn-pass').style.display = (isMyTurn && st.diceRolled) ? '' : 'none';
 
-    // No movable pieces until engine is wired (Step 3)
-    renderPieces(document.getElementById('ludo-board'), st.players, [], null);
+    const movable = (isMyTurn && st.diceRolled) ? (st.movablePieces || []) : [];
+    const onPieceClick = isMyTurn
+      ? (color, idx) => this.sendAction('move', { pieceIdx: idx })
+      : null;
+    renderPieces(document.getElementById('ludo-board'), st.players, movable, onPieceClick);
 
     if (st.phase === 'game_over') this._showGameOver();
   }
@@ -316,10 +413,10 @@ class LudoApp {
       const code = $('room-code-display').textContent;
       navigator.clipboard.writeText(code).then(() => this.showToast('Room code copied!')).catch(() => this.showToast('Code: ' + code));
     });
-    $('btn-start').addEventListener('click', () => this.startGame());
-    $('btn-roll').addEventListener('click',  () => this.sendAction('roll'));
-    $('btn-pass').addEventListener('click',  () => this.sendAction('pass'));
-    $('btn-play-again').addEventListener('click', () => this.playAgain());
+    $('btn-start').addEventListener('click',     () => this.startGame());
+    $('btn-roll').addEventListener('click',      () => this.sendAction('roll'));
+    $('btn-pass').addEventListener('click',      () => this.sendAction('pass'));
+    $('btn-play-again').addEventListener('click',() => this.playAgain());
   }
 }
 
