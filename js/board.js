@@ -81,10 +81,14 @@ export function buildBoard(el) {
   el.appendChild(grid);
 }
 
+// pos 0  → home base
+// pos 1-51  → outer track (51 squares; each color's home entry is at pos 51)
+// pos 52-57 → home column (6 cells)
+// pos 58    → center
 export function pieceCoords(color, pos, pieceIdx) {
   if (pos === 0)  return HOME_BASE[color][pieceIdx];
-  if (pos <= 52)  return TRACK[(COLOR_START[color] + pos - 1) % 52];
-  if (pos <= 58)  return HOME_COL[color][pos - 53];
+  if (pos <= 51)  return TRACK[(COLOR_START[color] + pos - 1) % 52];
+  if (pos <= 57)  return HOME_COL[color][pos - 52];
   return CENTER;
 }
 

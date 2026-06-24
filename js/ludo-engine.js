@@ -2,6 +2,7 @@ import { COLOR_START } from './board.js';
 
 const SAFE_TRACK_IDX = new Set([0, 8, 13, 21, 26, 34, 39, 47]);
 
+// pos 58 = center (home). Pieces skip turns once at 58.
 export function rollDice() {
   return Math.floor(Math.random() * 6) + 1;
 }
@@ -15,9 +16,9 @@ export function getMovablePieces(state, color, dice) {
   if (!player) return [];
   const result = [];
   player.pieces.forEach((pos, idx) => {
-    if (pos === 59) return;
+    if (pos === 58) return;                          // already home
     if (pos === 0) { if (dice === 6) result.push(idx); return; }
-    if (pos + dice <= 59) result.push(idx);
+    if (pos + dice <= 58) result.push(idx);          // can't overshoot center
   });
   return result;
 }
@@ -29,20 +30,21 @@ export function movePiece(state, color, pieceIdx, dice) {
   const newPos = oldPos === 0 ? 1 : oldPos + dice;
   player.pieces[pieceIdx] = newPos;
 
-  if (newPos >= 1 && newPos <= 52) {
+  // Captures only possible on outer track (pos 1-51)
+  if (newPos >= 1 && newPos <= 51) {
     const landIdx = absIdx(color, newPos);
     if (!SAFE_TRACK_IDX.has(landIdx)) {
       for (const opp of st.players) {
         if (opp.color === color) continue;
         opp.pieces = opp.pieces.map(p => {
-          if (p < 1 || p > 52) return p;
+          if (p < 1 || p > 51) return p;
           return absIdx(opp.color, p) === landIdx ? 0 : p;
         });
       }
     }
   }
 
-  if (player.pieces.every(p => p === 59)) {
+  if (player.pieces.every(p => p === 58)) {
     st.phase = 'game_over';
     st.winner = { id: player.id, name: player.name };
   }
@@ -55,7 +57,7 @@ export function nextTurn(state) {
   const n = st.players.length;
   for (let i = 1; i <= n; i++) {
     const idx = (st.currentPlayerIndex + i) % n;
-    if (st.players[idx].pieces.some(p => p !== 59)) {
+    if (st.players[idx].pieces.some(p => p !== 58)) {
       st.currentPlayerIndex = idx;
       break;
     }

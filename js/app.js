@@ -285,7 +285,7 @@ class LudoApp {
 
       let msg = `${cur.name} moved piece ${pieceIdx + 1}`;
       if (captured.length) msg += ` — captured ${captured.join(' & ')}!`;
-      if (newPos === 59)   msg += ' — reached home!';
+      if (newPos === 58)   msg += ' — reached home!';
 
       newSt.lastAction    = msg;
       newSt.movablePieces = [];
@@ -297,11 +297,17 @@ class LudoApp {
         return;
       }
 
-      if (dice === 6) {
+      // Extra turn: rolling 6, capturing a piece, or getting a piece home
+      const getsExtraTurn = dice === 6 || captured.length > 0 || newPos === 58;
+      if (getsExtraTurn) {
         newSt.diceValue   = null;
         newSt.diceRolled  = false;
         newSt.diceRolling = false;
-        newSt.lastAction += ' — rolled 6, play again!';
+        const reasons = [];
+        if (dice === 6)           reasons.push('rolled 6');
+        if (captured.length > 0) reasons.push('captured a piece');
+        if (newPos === 58)        reasons.push('reached home');
+        newSt.lastAction += ` — ${reasons.join(' & ')}! Roll again.`;
       } else {
         const savedMsg = newSt.lastAction;
         newSt = nextTurn(newSt);
