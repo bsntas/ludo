@@ -16,9 +16,9 @@ export function getMovablePieces(state, color, dice) {
   if (!player) return [];
   const result = [];
   player.pieces.forEach((pos, idx) => {
-    if (pos === 59) return;                          // already finished
-    if (pos === 0) { if (dice === 6) result.push(idx); return; } // need 6 to leave home
-    if (pos + dice <= 59) result.push(idx);          // cannot overshoot center
+    if (pos === 59) return;
+    if (pos === 0) { if (dice === 6) result.push(idx); return; }
+    if (pos + dice <= 59) result.push(idx);
   });
   return result;
 }
@@ -31,7 +31,6 @@ export function movePiece(state, color, pieceIdx, dice) {
   const newPos = oldPos === 0 ? 1 : oldPos + dice;
   player.pieces[pieceIdx] = newPos;
 
-  // Capture only possible on outer track (pos 1-52)
   if (newPos >= 1 && newPos <= 52) {
     const landIdx = absIdx(color, newPos);
     if (!SAFE_TRACK_IDX.has(landIdx)) {
@@ -45,7 +44,6 @@ export function movePiece(state, color, pieceIdx, dice) {
     }
   }
 
-  // Win: all 4 pieces at center (pos 59)
   if (player.pieces.every(p => p === 59)) {
     st.phase = 'game_over';
     st.winner = { id: player.id, name: player.name };
@@ -65,8 +63,10 @@ export function nextTurn(state) {
       break;
     }
   }
-  st.diceValue  = null;
-  st.diceRolled = false;
+  st.diceValue    = null;
+  st.diceRolled   = false;
+  st.diceRolling  = false;
   st.movablePieces = [];
+  st.lastMoved    = null;
   return st;
 }

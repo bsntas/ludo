@@ -38,7 +38,7 @@ button:active  { transform: scale(.95); }
 button:disabled { opacity: .45; cursor: not-allowed; }
 input { font-family: inherit; border: none; outline: none; }
 
-/* ─ Screens ───────────────────────────────────────────── */
+/* ─ Screens ──────────────────────────────────────── */
 .screen {
   position: fixed; inset: 0; display: none;
   flex-direction: column; align-items: center; justify-content: center;
@@ -46,7 +46,7 @@ input { font-family: inherit; border: none; outline: none; }
 }
 .screen.active { display: flex; }
 
-/* ─ HOME ───────────────────────────────────────────────── */
+/* ─ HOME ────────────────────────────────────────── */
 #screen-home { background: radial-gradient(ellipse at 50% 20%, #1e2a5e, #0d0d1a 70%); }
 
 .home-wrap { width: 100%; max-width: 400px; display: flex; flex-direction: column; align-items: center; gap: 28px; }
@@ -124,7 +124,7 @@ input { font-family: inherit; border: none; outline: none; }
 }
 .btn-join-go:hover:not(:disabled) { background: rgba(255,255,255,.15); }
 
-/* ─ LOBBY ───────────────────────────────────────────────── */
+/* ─ LOBBY ────────────────────────────────────────── */
 #screen-lobby { background: radial-gradient(ellipse at 50% 30%, #1e2a5e, #0d0d1a 70%); }
 
 .lobby-wrap { width: 100%; max-width: 480px; display: flex; flex-direction: column; gap: 20px; }
@@ -176,7 +176,7 @@ input { font-family: inherit; border: none; outline: none; }
 }
 #btn-start:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(245,200,66,.5); }
 
-/* ─ GAME SCREEN ───────────────────────────────────────── */
+/* ─ GAME SCREEN ───────────────────────────────── */
 #screen-game {
   background: #1a1a2e;
   align-items: stretch; justify-content: flex-start;
@@ -203,9 +203,10 @@ input { font-family: inherit; border: none; outline: none; }
   font-size: 20px; width: 36px; height: 36px;
   display: flex; align-items: center; justify-content: center;
   background: var(--surface-light); border-radius: 8px; font-weight: 900; flex-shrink: 0;
+  transition: background .2s;
 }
 
-/* ─ Board ─────────────────────────────────────────────────── */
+/* ─ Board ───────────────────────────────────────────────── */
 .board-wrap {
   flex: 1; display: flex; align-items: center; justify-content: center;
   overflow: hidden; padding: 4px;
@@ -227,14 +228,12 @@ input { font-family: inherit; border: none; outline: none; }
   position: relative; overflow: visible;
 }
 
-/* Zone backgrounds */
 .bcell-zone-red    { background: #f4a0a0; }
 .bcell-zone-blue   { background: #a0bef4; }
 .bcell-zone-green  { background: #a0e8b0; }
 .bcell-zone-yellow { background: #f0f0a0; }
 .bcell-blank       { background: #d8d0c8; }
 
-/* Inner home circles (base positions) */
 .bcell-base::before {
   content: '';
   position: absolute;
@@ -244,23 +243,19 @@ input { font-family: inherit; border: none; outline: none; }
   pointer-events: none;
 }
 
-/* Track path */
 .bcell-path  { background: #f8f5ee; }
 
-/* Safe squares */
 .bcell-safe  { background: #f8f5ee; }
 .bcell-safe::after {
-  content: '\2605'; /* filled star */
+  content: '\2605';
   font-size: .55em; color: rgba(0,0,0,.22); pointer-events: none;
 }
 
-/* Start squares */
 .bcell-start-red    { background: #e53e3e; }
 .bcell-start-blue   { background: #3182ce; }
 .bcell-start-green  { background: #38a169; }
 .bcell-start-yellow { background: #d69e2e; }
 
-/* Safe-start squares also show star */
 .bcell-start-red::after,
 .bcell-start-blue::after,
 .bcell-start-green::after,
@@ -269,13 +264,11 @@ input { font-family: inherit; border: none; outline: none; }
   font-size: .55em; color: rgba(255,255,255,.55); pointer-events: none;
 }
 
-/* Home columns (colored lanes) */
 .bcell-hcol-red    { background: #f9c0c0; }
 .bcell-hcol-blue   { background: #c0d6f9; }
 .bcell-hcol-green  { background: #c0f2cc; }
 .bcell-hcol-yellow { background: #f2f2c0; }
 
-/* Center finishing square */
 .bcell-center {
   background: conic-gradient(
     #e53e3e 0 25%, #3182ce 25% 50%,
@@ -299,7 +292,7 @@ input { font-family: inherit; border: none; outline: none; }
   color: rgba(255,255,255,.9);
   text-shadow: 0 1px 2px rgba(0,0,0,.5);
   cursor: default;
-  transition: transform .15s, box-shadow .15s;
+  transition: box-shadow .15s;
   pointer-events: none;
 }
 .piece-red    { background: radial-gradient(circle at 35% 35%, #ff8888, #c02828); }
@@ -311,23 +304,18 @@ input { font-family: inherit; border: none; outline: none; }
   cursor: pointer; pointer-events: auto;
   animation: pieceGlow 1s ease-in-out infinite;
 }
-.piece.movable:hover { transform: scale(1.25); z-index: 20; }
+.piece.movable:hover { transform: scale(1.25) !important; z-index: 20; }
 @keyframes pieceGlow {
   0%,100% { box-shadow: 0 1px 4px rgba(0,0,0,.55), 0 0 0 0 rgba(255,255,255,.5); }
   50%      { box-shadow: 0 1px 4px rgba(0,0,0,.55), 0 0 0 4px rgba(255,255,255,.45); }
 }
 
-/* Stacked pieces: offset slightly so all are visible */
 .bcell .piece:nth-child(1) { transform: translate(-22%, -22%); }
 .bcell .piece:nth-child(2) { transform: translate( 22%, -22%); }
 .bcell .piece:nth-child(3) { transform: translate(-22%,  22%); }
 .bcell .piece:nth-child(4) { transform: translate( 22%,  22%); }
-.bcell .piece.movable:nth-child(1):hover { transform: translate(-22%,-22%) scale(1.25); }
-.bcell .piece.movable:nth-child(2):hover { transform: translate( 22%,-22%) scale(1.25); }
-.bcell .piece.movable:nth-child(3):hover { transform: translate(-22%, 22%) scale(1.25); }
-.bcell .piece.movable:nth-child(4):hover { transform: translate( 22%, 22%) scale(1.25); }
 
-/* ─ Controls bar ────────────────────────────────────────── */
+/* ─ Controls bar ──────────────────────────────────── */
 .ctrl-bar {
   flex-shrink: 0; display: flex; align-items: center; justify-content: center; gap: 12px;
   padding: 10px 16px max(10px, env(safe-area-inset-bottom, 0px));
@@ -344,7 +332,7 @@ input { font-family: inherit; border: none; outline: none; }
   background: var(--surface-light); color: var(--text); border: 1.5px solid rgba(255,255,255,.2);
 }
 
-/* ─ Modal ─────────────────────────────────────────────────── */
+/* ─ Modal ───────────────────────────────────────────────── */
 .modal {
   position: fixed; inset: 0; background: rgba(0,0,0,.7);
   display: none; align-items: center; justify-content: center;
@@ -356,13 +344,13 @@ input { font-family: inherit; border: none; outline: none; }
   border: 1px solid rgba(255,255,255,.12); border-radius: 20px;
   padding: 28px 24px; width: 100%; max-width: 360px;
   text-align: center; box-shadow: var(--shadow-deep);
-  animation: popIn .2s cubic-bezier(.34,1.56,.64,1);
+  animation: popIn .25s cubic-bezier(.34,1.56,.64,1);
 }
-@keyframes popIn { from{opacity:0;transform:scale(.85)} to{opacity:1;transform:scale(1)} }
+@keyframes popIn { from{opacity:0;transform:scale(.8)} to{opacity:1;transform:scale(1)} }
 .modal-box h2 { font-size: 30px; font-weight: 900; margin-bottom: 10px; color: var(--gold); }
 .modal-box p  { color: var(--text-muted); margin-bottom: 24px; font-size: 15px; }
 
-/* ─ Toast ─────────────────────────────────────────────────── */
+/* ─ Toast ───────────────────────────────────────────────── */
 .toast {
   position: fixed; top: 70px; left: 50%;
   transform: translateX(-50%) translateY(-20px);
@@ -377,10 +365,58 @@ input { font-family: inherit; border: none; outline: none; }
 .toast.toast-warn    { background: linear-gradient(135deg, #7b4f00, #c07c00); }
 .toast.toast-success { background: linear-gradient(135deg, #1a5c2e, #276749); }
 
-/* ─ Responsive ──────────────────────────────────────────── */
+/* ─ Step 4: Dice animations ────────────────────────────── */
+@keyframes diceRollAnim {
+  0%,100% { transform: scale(1)    rotate(0deg); }
+  20%     { transform: scale(1.25) rotate(-22deg); }
+  40%     { transform: scale(.88)  rotate(16deg); }
+  60%     { transform: scale(1.15) rotate(-10deg); }
+  80%     { transform: scale(.95)  rotate(6deg); }
+}
+.dice-chip.rolling {
+  animation: diceRollAnim .42s ease-in-out infinite;
+  background: rgba(245,200,66,.2);
+  color: var(--gold);
+}
+@keyframes diceLandAnim {
+  0%   { transform: scale(1.8);  filter: brightness(1.9); }
+  55%  { transform: scale(.86);  filter: brightness(1.2); }
+  80%  { transform: scale(1.1);  filter: brightness(1); }
+  100% { transform: scale(1);    filter: brightness(1); }
+}
+.dice-chip.landed {
+  animation: diceLandAnim .42s cubic-bezier(.34,1.56,.64,1) forwards;
+}
+
+/* ─ Step 4: Piece flash on move ────────────────────────── */
+@keyframes pieceLandFlash {
+  0%   { filter: brightness(2.4) drop-shadow(0 0 7px rgba(255,255,255,.95)); }
+  55%  { filter: brightness(1.5) drop-shadow(0 0 3px rgba(255,255,255,.4)); }
+  100% { filter: brightness(1)   drop-shadow(none); }
+}
+.piece.just-moved {
+  animation: pieceLandFlash .6s ease-out forwards;
+}
+
+/* ─ Step 4: Confetti ───────────────────────────────────── */
+#confetti-container {
+  position: fixed; inset: 0;
+  pointer-events: none; z-index: 160; overflow: hidden;
+}
+@keyframes confettiFall {
+  0%   { transform: translateY(-10px) rotate(0deg)   scaleY(1);   opacity: 1; }
+  100% { transform: translateY(105vh) rotate(720deg) scaleY(.5);  opacity: 0; }
+}
+.confetti-piece {
+  position: absolute; top: -12px; opacity: 0;
+  animation: confettiFall var(--cdur, 2s) var(--cdelay, 0s) ease-in forwards;
+}
+
+/* ─ Responsive ────────────────────────────────────────── */
 @media (max-width: 480px) {
   .logo-text { font-size: 72px; }
   .color-pick-btn { width: 38px; height: 38px; }
+  .btn-roll { padding: 12px 28px; font-size: 15px; }
 }
 @media (min-width: 768px) {
   .home-wrap  { max-width: 440px; }

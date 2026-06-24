@@ -5,6 +5,7 @@ import { rollDice, getMovablePieces, movePiece, nextTurn } from './ludo-engine.j
 const APP_ID      = 'bsntas-ludo-v1';
 const ROOM_CONFIG = { appId: APP_ID, brokerUrl: 'wss://broker.hivemq.com:8884/mqtt' };
 const COLOR_ORDER = ['red', 'blue', 'green', 'yellow'];
+const DICE_FACES  = ['', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
 
 class LudoApp {
   constructor() {
@@ -23,8 +24,6 @@ class LudoApp {
     this._boardBuilt = false;
     this.bindUI();
   }
-
-  // ─── Utilities
 
   genCode() { return Math.random().toString(36).substr(2, 6).toUpperCase(); }
 
@@ -61,10 +60,7 @@ class LudoApp {
     this.trRoom.onPeerLeave(peerId => {
       const pl = this._lobbyPlayers.find(p => p.id === peerId);
       if (!pl) return;
-      if (this.publicState?.phase === 'playing') {
-        this.showToast(`${pl.name} disconnected`, 'warn');
-        return;
-      }
+      if (this.publicState?.phase === 'playing') { this.showToast(`${pl.name} disconnected`, 'warn'); return; }
       this._lobbyPlayers = this._lobbyPlayers.filter(p => p.id !== peerId);
       this.showToast(`${pl.name} left the lobby`, 'warn');
       this._broadcastLobby();
@@ -208,7 +204,9 @@ class LudoApp {
       currentPlayerIndex: 0,
       diceValue: null,
       diceRolled: false,
+      diceRolling: false,
       movablePieces: [],
+      lastMoved: null,
       lastAction: 'Game started! Roll the dice.',
       winner: null,
     };
@@ -229,42 +227,56 @@ class LudoApp {
 
   _handleAction(playerId, data) {
     if (!this.publicState || this.publicState.phase !== 'playing') return;
-    const st = this.publicState;
+    const st  = this.publicState;
     const cur = st.players[st.currentPlayerIndex];
     if (cur.id !== playerId) return;
 
     const act = data.action || data.type;
 
     if (act === 'roll') {
-      if (st.diceRolled) return;
+      if (st.diceRolled || st.diceRolling) return;
       const dice    = rollDice();
       const movable = getMovablePieces(st, cur.color, dice);
-      st.diceValue      = dice;
-      st.diceRolled     = true;
-      st.lastAction     = `${cur.name} rolled a ${dice}`;
-      st.movablePieces  = movable.map(idx => ({ color: cur.color, idx }));
-      this.publicState  = st;
+
+      st.diceRolling   = true;
+      st.diceRolled    = false;
+      st.diceValue     = null;
+      st.lastAction    = `${cur.name} is rolling…`;
+      st.movablePieces = [];
+      st.lastMoved     = null;
+      this.publicState = st;
       this._broadcastGameState();
-      if (movable.length === 0) {
-        setTimeout(() => {
-          this.publicState = nextTurn(this.publicState);
-          this.publicState.lastAction = `${cur.name} rolled ${dice} — no moves, turn passed`;
-          this._broadcastGameState();
-        }, 1500);
-      }
+
+      setTimeout(() => {
+        const s = this.publicState;
+        if (!s || s.phase !== 'playing') return;
+        s.diceRolling    = false;
+        s.diceValue      = dice;
+        s.diceRolled     = true;
+        s.lastAction     = `${cur.name} rolled a ${dice}`;
+        s.movablePieces  = movable.map(idx => ({ color: cur.color, idx }));
+        this.publicState = s;
+        this._broadcastGameState();
+        if (movable.length === 0) {
+          setTimeout(() => {
+            if (!this.publicState || this.publicState.phase !== 'playing') return;
+            this.publicState = nextTurn(this.publicState);
+            this.publicState.lastAction = `${cur.name} rolled ${dice} — no moves, turn passed`;
+            this._broadcastGameState();
+          }, 1500);
+        }
+      }, 550);
       return;
     }
 
     if (act === 'move') {
-      if (!st.diceRolled) return;
+      if (!st.diceRolled || st.diceRolling) return;
       const { pieceIdx } = data;
       if (pieceIdx === undefined || pieceIdx === null) return;
       const movable = getMovablePieces(st, cur.color, st.diceValue);
       if (!movable.includes(pieceIdx)) return;
 
       const dice = st.diceValue;
-
-      // Snapshot opponent positions before move for capture detection
       const prevOpp = {};
       for (const opp of st.players) {
         if (opp.color !== cur.color) prevOpp[opp.color] = [...opp.pieces];
@@ -273,7 +285,6 @@ class LudoApp {
       let newSt = movePiece(st, cur.color, pieceIdx, dice);
       const newPos = newSt.players.find(p => p.color === cur.color).pieces[pieceIdx];
 
-      // Detect captures
       const captured = [];
       for (const opp of newSt.players) {
         if (opp.color === cur.color) continue;
@@ -282,10 +293,13 @@ class LudoApp {
         });
       }
 
-      newSt.lastAction    = `${cur.name} moved piece ${pieceIdx + 1}`;
-      if (captured.length)  newSt.lastAction += ` — captured ${captured.join(' & ')}!`;
-      if (newPos === 59)    newSt.lastAction += ' — reached home!';
+      let msg = `${cur.name} moved piece ${pieceIdx + 1}`;
+      if (captured.length) msg += ` — captured ${captured.join(' & ')}!`;
+      if (newPos === 59)   msg += ' — reached home!';
+
+      newSt.lastAction    = msg;
       newSt.movablePieces = [];
+      newSt.lastMoved     = { color: cur.color, idx: pieceIdx };
 
       if (newSt.phase === 'game_over') {
         this.publicState = newSt;
@@ -294,20 +308,14 @@ class LudoApp {
       }
 
       if (dice === 6) {
-        // Extra turn: same player, reset dice
-        newSt.diceValue  = null;
-        newSt.diceRolled = false;
+        newSt.diceValue   = null;
+        newSt.diceRolled  = false;
+        newSt.diceRolling = false;
         newSt.lastAction += ' — rolled 6, play again!';
       } else {
+        const savedMsg = newSt.lastAction;
         newSt = nextTurn(newSt);
-        // nextTurn clears lastAction to ''; restore it
-        newSt.lastAction = st.lastAction.replace(st.lastAction, newSt.lastAction) ||
-          `${cur.name} moved piece ${pieceIdx + 1}`;
-        // Simpler: just re-set it after nextTurn
-        const msg = `${cur.name} moved piece ${pieceIdx + 1}`
-          + (captured.length ? ` — captured ${captured.join(' & ')}!` : '')
-          + (newPos === 59   ? ' — reached home!' : '');
-        newSt.lastAction = msg;
+        newSt.lastAction = savedMsg;
       }
 
       this.publicState = newSt;
@@ -316,7 +324,7 @@ class LudoApp {
     }
 
     if (act === 'pass') {
-      if (!st.diceRolled) return;
+      if (!st.diceRolled || st.diceRolling) return;
       const name = cur.name, dice = st.diceValue;
       this.publicState = nextTurn(st);
       this.publicState.lastAction = `${name} passed (rolled ${dice})`;
@@ -347,33 +355,81 @@ class LudoApp {
     document.getElementById('last-action').textContent = st.lastAction || '';
 
     const chip = document.getElementById('dice-chip');
-    if (st.diceValue) {
-      chip.textContent = ['', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'][st.diceValue] || st.diceValue;
+    if (st.diceRolling) {
+      chip.textContent   = '🎲';
       chip.style.display = '';
+      chip.className     = 'dice-chip rolling';
+      chip.dataset.val   = '';
+    } else if (st.diceValue) {
+      const newVal = String(st.diceValue);
+      chip.textContent   = DICE_FACES[st.diceValue] || st.diceValue;
+      chip.style.display = '';
+      if (chip.dataset.val !== newVal) {
+        chip.className   = 'dice-chip landed';
+        chip.dataset.val = newVal;
+        setTimeout(() => { if (chip.classList.contains('landed')) chip.className = 'dice-chip'; }, 450);
+      }
     } else {
       chip.style.display = 'none';
+      chip.className     = 'dice-chip';
+      chip.dataset.val   = '';
     }
 
-    document.getElementById('btn-roll').disabled = !isMyTurn || st.diceRolled;
-    document.getElementById('btn-pass').style.display = (isMyTurn && st.diceRolled) ? '' : 'none';
+    document.getElementById('btn-roll').disabled =
+      !isMyTurn || st.diceRolled || st.diceRolling;
+    document.getElementById('btn-pass').style.display =
+      (isMyTurn && st.diceRolled && !st.diceRolling) ? '' : 'none';
 
-    const movable = (isMyTurn && st.diceRolled) ? (st.movablePieces || []) : [];
+    const movable = (isMyTurn && st.diceRolled && !st.diceRolling)
+      ? (st.movablePieces || []) : [];
     const onPieceClick = isMyTurn
       ? (color, idx) => this.sendAction('move', { pieceIdx: idx })
       : null;
-    renderPieces(document.getElementById('ludo-board'), st.players, movable, onPieceClick);
+    const boardEl = document.getElementById('ludo-board');
+    renderPieces(boardEl, st.players, movable, onPieceClick);
+
+    if (st.lastMoved) {
+      const { color, idx } = st.lastMoved;
+      const pieceEl = boardEl.querySelector(`.piece-${color}[data-idx="${idx}"]`);
+      if (pieceEl) {
+        pieceEl.classList.remove('just-moved');
+        void pieceEl.offsetWidth;
+        pieceEl.classList.add('just-moved');
+      }
+    }
 
     if (st.phase === 'game_over') this._showGameOver();
   }
 
   _showGameOver() {
-    const st = this.publicState;
+    const st  = this.publicState;
     const won = st.winner?.id === selfId;
     document.getElementById('go-title').textContent = won ? '🏆 You Win!' : 'Game Over!';
     document.getElementById('go-msg').textContent   = won
       ? 'You got all 4 pieces home first!'
       : `${st.winner?.name || 'Someone'} won the game!`;
     document.getElementById('modal-gameover').classList.add('visible');
+    if (won) this._launchConfetti();
+  }
+
+  _launchConfetti() {
+    const c = document.getElementById('confetti-container');
+    if (!c) return;
+    c.innerHTML = '';
+    const cols = ['#f5c842','#e53e3e','#3182ce','#38a169','#d69e2e','#fff','#ff88cc','#88ffee'];
+    for (let i = 0; i < 72; i++) {
+      const el = document.createElement('div');
+      el.className = 'confetti-piece';
+      el.style.setProperty('--cdur',   (1.6 + Math.random() * 2.2).toFixed(2) + 's');
+      el.style.setProperty('--cdelay', (Math.random() * 1.4).toFixed(2) + 's');
+      el.style.left       = (Math.random() * 100) + '%';
+      el.style.background = cols[Math.floor(Math.random() * cols.length)];
+      el.style.width      = (6 + Math.random() * 8) + 'px';
+      el.style.height     = (6 + Math.random() * 8) + 'px';
+      el.style.borderRadius = Math.random() > .4 ? '50%' : '2px';
+      c.appendChild(el);
+    }
+    setTimeout(() => { c.innerHTML = ''; }, 5200);
   }
 
   playAgain() {
@@ -387,14 +443,10 @@ class LudoApp {
     }
   }
 
-  // ─── Session
-
   saveSession() {
     if (!this.roomCode) return;
     try { sessionStorage.setItem('ludo-session', JSON.stringify({ roomCode: this.roomCode, playerName: this.myName, playerColor: this.myColor, isHost: this.isHost })); } catch (_) {}
   }
-
-  // ─── UI bindings
 
   bindUI() {
     const $ = id => document.getElementById(id);
@@ -405,18 +457,18 @@ class LudoApp {
         this.myColor = btn.dataset.color;
       });
     });
-    $('btn-create').addEventListener('click', () => this.createGame());
-    $('btn-join').addEventListener('click',   () => this.joinGame());
-    $('player-name').addEventListener('keydown', e => { if (e.key==='Enter') { const c=$('room-code-input').value.trim(); if(c) this.joinGame(); else this.createGame(); } });
+    $('btn-create').addEventListener('click',     () => this.createGame());
+    $('btn-join').addEventListener('click',       () => this.joinGame());
+    $('player-name').addEventListener('keydown',  e => { if (e.key==='Enter') { const c=$('room-code-input').value.trim(); if(c) this.joinGame(); else this.createGame(); } });
     $('room-code-input').addEventListener('keydown', e => { if (e.key==='Enter') this.joinGame(); });
     $('btn-copy').addEventListener('click', () => {
       const code = $('room-code-display').textContent;
       navigator.clipboard.writeText(code).then(() => this.showToast('Room code copied!')).catch(() => this.showToast('Code: ' + code));
     });
-    $('btn-start').addEventListener('click',     () => this.startGame());
-    $('btn-roll').addEventListener('click',      () => this.sendAction('roll'));
-    $('btn-pass').addEventListener('click',      () => this.sendAction('pass'));
-    $('btn-play-again').addEventListener('click',() => this.playAgain());
+    $('btn-start').addEventListener('click',      () => this.startGame());
+    $('btn-roll').addEventListener('click',       () => this.sendAction('roll'));
+    $('btn-pass').addEventListener('click',       () => this.sendAction('pass'));
+    $('btn-play-again').addEventListener('click', () => this.playAgain());
   }
 }
 
