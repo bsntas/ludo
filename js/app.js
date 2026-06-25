@@ -19,7 +19,7 @@ class LudoApp {
     this._toastTimer      = null;
     this._heartbeatInterval = null;
     this._reconnecting    = false;
-    this._foregroundTimer = null;  // timeout to force-reconnect if ping gets no reply
+    this._foregroundTimer = null;
     this._lobbyPlayers    = [];
     this._boardBuilt      = false;
     this.bindUI();
@@ -48,13 +48,11 @@ class LudoApp {
     if (!this.roomCode) return;
 
     if (!this.trRoom || !this.sendMsg) {
-      // Connection object is gone — need a full reconnect (guests only; host keeps state)
       if (!this.isHost && !this._reconnecting) this._attemptReconnect();
       return;
     }
 
     if (this.isHost) {
-      // Re-push authoritative state to all peers after a short settle delay
       setTimeout(() => {
         if (this.publicState?.phase === 'playing') this._broadcastGameState();
         else this._broadcastLobby();
@@ -64,7 +62,6 @@ class LudoApp {
         if (!this._reconnecting) this._attemptReconnect();
         return;
       }
-      // Ping host — if no game/lobby-state arrives within 8 s, force rejoin
       try { this.sendMsg({ type: 'ping' }, this.hostPeerId); } catch (_) {
         if (!this._reconnecting) this._attemptReconnect();
         return;
@@ -141,7 +138,6 @@ class LudoApp {
       if (data.type === 'action') { this._handleAction(peerId, data); return; }
 
       if (data.type === 'ping') {
-        // Reply with current state so the guest can resync
         if (this.publicState?.phase === 'playing') {
           sendMsg({ type: 'game-state', state: this.publicState }, peerId);
         } else {
@@ -195,7 +191,6 @@ class LudoApp {
     onMsg((data, peerId) => {
       if (this.isHost) return;
 
-      // host-hello: fires on initial join AND when Trystero re-establishes the peer link
       if (data.type === 'host-hello') {
         const isInitial = !this.hostPeerId;
         this.hostPeerId = peerId;
@@ -209,7 +204,6 @@ class LudoApp {
           btnJoin.disabled = false; btnJoin.textContent = 'Join →';
           this.saveSession();
         }
-        // Always (re-)register so host can resend current state
         sendMsg({ type: 'guest-join', name: this.myName, color: this.myColor }, peerId);
         return;
       }
@@ -220,7 +214,13 @@ class LudoApp {
         clearTimeout(this._foregroundTimer);
         this._lobbyPlayers = data.players;
         const me = data.players.find(p => p.id === selfId);
-        if (me) this.myColor = me.color;
+        if (me) {
+          if (me.color !== this.myColor) {
+            const c = me.color.charAt(0).toUpperCase() + me.color.slice(1);
+            this.showToast(`Color taken — you've been assigned ${c}`, 'warn');
+          }
+          this.myColor = me.color;
+        }
         this.renderLobbyPlayers();
         return;
       }
@@ -256,7 +256,7 @@ class LudoApp {
     document.getElementById('player-list').innerHTML = players.map((p, i) => `
       <div class="lobby-player">
         <div class="player-color-dot pcd-${p.color}"></div>
-        <span class="lobby-player-name">${escHtml(p.name)}</span>
+        <span class="lobby-player-name">${escHtml(p.name)}${p.id === selfId ? ' <span style="font-size:11px;color:var(--text-muted)">(You)</span>' : ''}</span>
         ${i === 0 ? '<span class="host-chip">HOST</span>' : ''}
       </div>`).join('');
     document.getElementById('player-count').textContent = `${players.length} / 4 players`;
@@ -422,6 +422,20 @@ class LudoApp {
     const isMyTurn = st.currentPlayerIndex === myIdx;
     const cur      = st.players[st.currentPlayerIndex];
 
+    // Update players identity strip
+    const strip = document.getElementById('players-strip');
+    if (strip) {
+      strip.innerHTML = st.players.map((p, i) => {
+        const isMe     = p.id === selfId;
+        const isActive = i === st.currentPlayerIndex;
+        return `<div class="ps-chip ps-${p.color}${isActive ? ' ps-active' : ''}">`
+          + `<span class="ps-dot"></span>`
+          + `<span class="ps-name">${escHtml(p.name)}</span>`
+          + (isMe ? `<span class="ps-you">You</span>` : '')
+          + `</div>`;
+      }).join('');
+    }
+
     const badge = document.getElementById('turn-badge');
     badge.textContent = isMyTurn ? '✨ Your Turn!' : `${cur?.name || ''}'s Turn`;
     badge.className   = 'turn-badge' + (isMyTurn ? ' my-turn' : '');
@@ -543,7 +557,6 @@ class LudoApp {
     $('btn-pass').addEventListener('click',       () => this.sendAction('pass'));
     $('btn-play-again').addEventListener('click', () => this.playAgain());
 
-    // Re-establish connection when returning from background or going back online
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && this.roomCode) this._onForeground();
     });
