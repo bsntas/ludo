@@ -16,12 +16,13 @@ class LudoApp {
     this.hostPeerId  = null;
     this.roomCode    = null;
     this.publicState = null;
-    this._toastTimer      = null;
+    this._toastTimer        = null;
     this._heartbeatInterval = null;
-    this._reconnecting    = false;
-    this._foregroundTimer = null;
-    this._lobbyPlayers    = [];
-    this._boardBuilt      = false;
+    this._reconnecting      = false;
+    this._foregroundTimer   = null;
+    this._joinTimeout       = null;   // stored on instance so reconnects can clear it
+    this._lobbyPlayers      = [];
+    this._boardBuilt        = false;
     this.bindUI();
   }
 
@@ -83,7 +84,15 @@ class LudoApp {
     this.trRoom = joinRoom(ROOM_CONFIG, code);
     const [sendMsg, onMsg] = this.trRoom.makeAction('msg');
     this.sendMsg = sendMsg;
-    this._heartbeatInterval = setInterval(() => { if (this.trRoom) this._broadcastLobby(); }, 25000);
+
+    // Heartbeat: send current state (lobby or game) to keep guests in sync
+    clearInterval(this._heartbeatInterval);
+    this._heartbeatInterval = setInterval(() => {
+      if (!this.trRoom) return;
+      if (this.publicState?.phase === 'playing') this._broadcastGameState();
+      else this._broadcastLobby();
+    }, 20000);
+
     this.trRoom.onPeerJoin(peerId => sendMsg({ type: 'host-hello', name: this.myName, color: this.myColor }, peerId));
     this.trRoom.onPeerLeave(peerId => {
       const pl = this._lobbyPlayers.find(p => p.id === peerId);
@@ -94,11 +103,12 @@ class LudoApp {
       this._broadcastLobby();
       this.renderLobbyPlayers();
     });
+
     onMsg((data, peerId) => {
       if (!this.isHost) return;
 
       if (data.type === 'guest-join') {
-        // ── Reconnect: same peerId already known ──────────────────────────────
+        // ── Same peerId already known → resend current state ──────────────────
         if (this._lobbyPlayers.find(p => p.id === peerId)) {
           if (this.publicState?.phase === 'playing') {
             sendMsg({ type: 'game-state', state: this.publicState }, peerId);
@@ -107,7 +117,8 @@ class LudoApp {
           }
           return;
         }
-        // ── Reconnect during game: match by name, swap peerId ─────────────────
+
+        // ── Game playing → reconnect by name, swap peerId ─────────────────────
         if (this.publicState?.phase === 'playing') {
           const byName = this._lobbyPlayers.find(
             p => p.name.toLowerCase() === data.name.toLowerCase()
@@ -123,9 +134,25 @@ class LudoApp {
           sendMsg({ type: 'error', message: 'Game already in progress', fatal: true }, peerId);
           return;
         }
-        // ── Normal new-player lobby join ──────────────────────────────────────
-        if (this._lobbyPlayers.length >= 4) { sendMsg({ type:'error', message:'Room is full (max 4)', fatal:true }, peerId); return; }
-        if (this._lobbyPlayers.find(p => p.name.toLowerCase() === data.name.toLowerCase())) { sendMsg({ type:'error', message:'Name already taken', fatal:true }, peerId); return; }
+
+        // ── Lobby: name already exists → reconnect (mobile peerId changed) ────
+        // This handles the case where onPeerLeave didn't fire cleanly on disconnect
+        const returning = this._lobbyPlayers.find(
+          p => p.name.toLowerCase() === data.name.toLowerCase()
+        );
+        if (returning) {
+          returning.id = peerId;
+          sendMsg({ type: 'lobby-state', players: this._lobbyPlayers }, peerId);
+          this._broadcastLobby();
+          this.renderLobbyPlayers();
+          return;
+        }
+
+        // ── Normal new-player lobby join ───────────────────────────────────────
+        if (this._lobbyPlayers.length >= 4) {
+          sendMsg({ type: 'error', message: 'Room is full (max 4)', fatal: true }, peerId);
+          return;
+        }
         let color = data.color;
         const taken = this.takenColors();
         if (taken.includes(color)) color = COLOR_ORDER.find(c => !taken.includes(c)) || 'red';
@@ -145,6 +172,7 @@ class LudoApp {
         }
       }
     });
+
     this.showScreen('lobby');
     document.getElementById('room-code-display').textContent = code;
     document.getElementById('btn-start').style.display   = '';
@@ -178,32 +206,45 @@ class LudoApp {
     this.trRoom = joinRoom(ROOM_CONFIG, code);
     const [sendMsg, onMsg] = this.trRoom.makeAction('msg');
     this.sendMsg = sendMsg;
-    const joinTimeout = setTimeout(() => {
+
+    // Clear any previous timeout so reconnect attempts don’t pile up
+    clearTimeout(this._joinTimeout);
+    this._joinTimeout = setTimeout(() => {
       if (!this.hostPeerId) {
         this.showToast(`Room "${code}" not found`, 'error');
         btnJoin.disabled = false; btnJoin.textContent = 'Join →';
-        this.trRoom?.leave?.(); this.trRoom = null;
+        this.trRoom?.leave?.(); this.trRoom = null; this.sendMsg = null;
       }
     }, 30000);
+
     this.trRoom.onPeerLeave(peerId => {
-      if (peerId === this.hostPeerId) { this.showToast('Host disconnected — reconnecting…', 'warn'); this._attemptReconnect(); }
+      if (peerId === this.hostPeerId) {
+        this.showToast('Host disconnected — reconnecting…', 'warn');
+        this._attemptReconnect();
+      }
     });
+
     onMsg((data, peerId) => {
       if (this.isHost) return;
 
+      // host-hello fires on initial join and when Trystero re-establishes the peer link
       if (data.type === 'host-hello') {
         const isInitial = !this.hostPeerId;
         this.hostPeerId = peerId;
         if (isInitial) {
-          clearTimeout(joinTimeout);
+          clearTimeout(this._joinTimeout);
           this.roomCode = code;
-          this.showScreen('lobby');
-          document.getElementById('room-code-display').textContent  = code;
-          document.getElementById('btn-start').style.display   = 'none';
-          document.getElementById('waiting-text').style.display = '';
+          // Only switch to the lobby screen on a fresh join, not a mid-game reconnect
+          if (!this.publicState) {
+            this.showScreen('lobby');
+            document.getElementById('room-code-display').textContent = code;
+            document.getElementById('btn-start').style.display   = 'none';
+            document.getElementById('waiting-text').style.display = '';
+          }
           btnJoin.disabled = false; btnJoin.textContent = 'Join →';
           this.saveSession();
         }
+        // Always (re-)register so host can resend current state
         sendMsg({ type: 'guest-join', name: this.myName, color: this.myColor }, peerId);
         return;
       }
@@ -217,7 +258,7 @@ class LudoApp {
         if (me) {
           if (me.color !== this.myColor) {
             const c = me.color.charAt(0).toUpperCase() + me.color.slice(1);
-            this.showToast(`Color taken — you've been assigned ${c}`, 'warn');
+            this.showToast(`Color taken — you’ve been assigned ${c}`, 'warn');
           }
           this.myColor = me.color;
         }
@@ -232,7 +273,10 @@ class LudoApp {
       }
       if (data.type === 'error') {
         this.showToast(data.message, 'error');
-        if (data.fatal) { btnJoin.disabled = false; btnJoin.textContent = 'Join →'; this.trRoom?.leave?.(); this.trRoom = null; }
+        if (data.fatal) {
+          btnJoin.disabled = false; btnJoin.textContent = 'Join →';
+          this.trRoom?.leave?.(); this.trRoom = null; this.sendMsg = null;
+        }
       }
     });
   }
@@ -422,7 +466,7 @@ class LudoApp {
     const isMyTurn = st.currentPlayerIndex === myIdx;
     const cur      = st.players[st.currentPlayerIndex];
 
-    // Update players identity strip
+    // Update player identity strip
     const strip = document.getElementById('players-strip');
     if (strip) {
       strip.innerHTML = st.players.map((p, i) => {
@@ -532,7 +576,12 @@ class LudoApp {
 
   saveSession() {
     if (!this.roomCode) return;
-    try { sessionStorage.setItem('ludo-session', JSON.stringify({ roomCode: this.roomCode, playerName: this.myName, playerColor: this.myColor, isHost: this.isHost })); } catch (_) {}
+    try {
+      sessionStorage.setItem('ludo-session', JSON.stringify({
+        roomCode: this.roomCode, playerName: this.myName,
+        playerColor: this.myColor, isHost: this.isHost,
+      }));
+    } catch (_) {}
   }
 
   bindUI() {
